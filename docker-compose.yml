@@ -1,0 +1,21 @@
+version: '3.1'
+
+services:
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: example
+    expose:
+      - "1999"
+    ports:
+      - "1999:1999"
+    command: -p 1999
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8080:8080"
