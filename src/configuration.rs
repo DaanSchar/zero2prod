@@ -1,19 +1,30 @@
 use secrecy::{ExposeSecret, Secret};
 use sqlx::postgres::PgConnectOptions;
+use serde::Deserialize;
+use crate::domain::SubscriberEmail;
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
+    pub email_client: EmailClientSettings,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
+pub struct EmailClientSettings {
+    pub base_url: String,
+    pub sender_email: String,
+    pub authorization_token: Secret<String>,
+    pub timeout_milliseconds: u64,
+}
+
+#[derive(Deserialize)]
 pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 pub struct DatabaseSettings {
     pub username: String,
     pub password: Secret<String>,
@@ -33,6 +44,16 @@ impl DatabaseSettings {
 
     pub fn with_db(&self) -> PgConnectOptions {
         return self.without_db().database(&self.database_name);
+    }
+}
+
+impl EmailClientSettings {
+    pub fn timeout(&self) -> std::time::Duration {
+        return std::time::Duration::from_millis(self.timeout_milliseconds);
+    }
+
+    pub fn sender(&self) -> Result<SubscriberEmail, String> {
+        return SubscriberEmail::parse(self.sender_email.clone());
     }
 }
 
