@@ -1,6 +1,9 @@
-use actix_web::{web, HttpResponse};
+use std::fmt::{Display, Formatter};
+use actix_web::{web, HttpResponse, ResponseError};
+use anyhow::Context;
 use sqlx::PgPool;
 use uuid::Uuid;
+use crate::routes::error_chain_fmt;
 
 #[derive(serde::Deserialize)]
 pub struct Parameters {
@@ -9,21 +12,20 @@ pub struct Parameters {
 
 #[allow(clippy::async_yields_async)]
 #[tracing::instrument(name = "Confirm a pending subscriber", skip(parameters, pool))]
-pub async fn confirm(parameters: web::Query<Parameters>, pool: web::Data<PgPool>) -> HttpResponse {
-    let id = match get_subscriber_id_from_token(&pool, &parameters.subscription_token).await {
-        Ok(id) => id,
-        Err(_) => return HttpResponse::InternalServerError().finish(),
-    };
-    match id {
-        // Non-existing token!
-        None => HttpResponse::Unauthorized().finish(),
-        Some(subscriber_id) => {
-            if confirm_subscriber(&pool, subscriber_id).await.is_err() {
-                return HttpResponse::InternalServerError().finish();
-            }
-            HttpResponse::Ok().finish()
-        }
-    }
+pub async fn confirm(
+    parameters: web::Query<Parameters>,
+    pool: web::Data<PgPool>,
+) -> Result<HttpResponse, ConfirmationError> {
+    let id = get_subscriber_id_from_token(&pool, &parameters.subscription_token)
+        .await
+        .context("Failed to retrieve subscriber id from token")?
+        .ok_or(ConfirmationError::UnknownToken)?;
+
+    confirm_subscriber(&pool, id)
+        .await
+        .context("Failed to confirm subscriber")?;
+
+    return Ok(HttpResponse::Ok().finish());
 }
 
 #[allow(clippy::async_yields_async)]
@@ -58,4 +60,27 @@ pub async fn get_subscriber_id_from_token(
             e
         })?;
     Ok(result.map(|r| r.subscriber_id))
+}
+
+#[derive(thiserror::Error)]
+pub enum ConfirmationError {
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+    #[error("There is no subscriber associated with this subscription token")]
+    UnknownToken,
+}
+
+impl ResponseError for ConfirmationError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        match self {
+            Self::UnexpectedError(_) => actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Self::UnknownToken => actix_web::http::StatusCode::UNAUTHORIZED,
+        }
+    }
+}
+
+impl std::fmt::Debug for ConfirmationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
 }
